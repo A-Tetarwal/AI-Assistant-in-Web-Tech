@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Voice Companion</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #voice-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+        }
+        #sphere {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1, #f9d5e5);
+            background-size: 400% 400%;
+            animation: gradientFlow 10s ease infinite, breathe 4s ease-in-out infinite;
+            box-shadow: 0 0 50px rgba(78, 205, 196, 0.7);
+            transition: all 0.5s ease;
+        }
+        #sphere.listening {
+            transform: scale(1.2);
+            box-shadow: 0 0 100px rgba(255, 107, 107, 0.9);
+        }
+        #mic-button {
+            position: absolute;
+            bottom: 50px;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background-color: rgba(255,255,255,0.1);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        #mic-button:hover {
+            background-color: rgba(255,255,255,0.2);
+        }
+        @keyframes gradientFlow {
+            0% {background-position: 0% 50%;}
+            50% {background-position: 100% 50%;}
+            100% {background-position: 0% 50%;}
+        }
+        @keyframes breathe {
+            0%, 100% {transform: scale(1);}
+            50% {transform: scale(1.05);}
+        }
+    </style>
+</head>
+<body>
+    <div id="voice-container">
+        <div id="sphere"></div>
+        <div id="mic-button">🎤</div>
+    </div>
+
+    <script>
+        class MemorableVoiceAI {
+            constructor() {
+                this.recognition = null;
+                this.transcript = '';
+                
+                this.initConversationHistory();
+                this.initSpeechRecognition();
+                this.bindEvents();
+            }
+
+            initConversationHistory() {
+                if (!localStorage.getItem('voiceAI_userId')) {
+                    localStorage.setItem('voiceAI_userId', this.generateUniqueId());
+                }
+
+                if (!localStorage.getItem(`voiceAI_history_${this.getUserId()}`)) {
+                    localStorage.setItem(`voiceAI_history_${this.getUserId()}`, JSON.stringify([]));
+                }
+            }
+
+            generateUniqueId() {
+                return 'user_' + Math.random().toString(36).substr(2, 9);
+            }
+
+            getUserId() {
+                return localStorage.getItem('voiceAI_userId');
+            }
+
+            getConversationHistory() {
+                const history = localStorage.getItem(`voiceAI_history_${this.getUserId()}`);
+                return history ? JSON.parse(history) : [];
+            }
+
+            addToConversationHistory(message, role) {
+                const history = this.getConversationHistory();
+                
+                if (history.length >= 10) {
+                    history.shift();
+                }
+
+                history.push({ role, content: message });
+                localStorage.setItem(`voiceAI_history_${this.getUserId()}`, JSON.stringify(history));
+            }
+
+            initSpeechRecognition() {
+                if ('webkitSpeechRecognition' in window) {
+                    this.recognition = new webkitSpeechRecognition();
+                    this.recognition.continuous = false;
+                    this.recognition.interimResults = false;
+                    this.recognition.lang = 'en-US';
+
+                    this.recognition.onresult = (event) => {
+                        const result = event.results[event.results.length - 1];
+                        this.transcript = result[0].transcript;
+                        
+                        this.addToConversationHistory(this.transcript, 'user');
+                        
+                        this.sendToAI();
+                    };
+
+                    this.recognition.onerror = (event) => {
+                        console.error('Speech recognition error:', event.error);
+                        this.resetUI();
+                    };
+
+                    this.recognition.onend = () => {
+                        this.resetUI();
+                    };
+                } else {
+                    alert('Web Speech API is not supported in this browser.');
+                }
+            }
+
+            bindEvents() {
+                const micButton = document.getElementById('mic-button');
+                const sphere = document.getElementById('sphere');
+                
+                micButton.addEventListener('click', () => this.toggleListening(micButton, sphere));
+            }
+
+            toggleListening(button, sphere) {
+                if (!this.recognition) return;
+
+                if (button.textContent === '🎤') {
+                    this.recognition.start();
+                    button.textContent = '◼';
+                    sphere.classList.add('listening');
+                } else {
+                    this.recognition.stop();
+                    this.resetUI();
+                }
+            }
+
+            resetUI() {
+                const micButton = document.getElementById('mic-button');
+                const sphere = document.getElementById('sphere');
+                micButton.textContent = '🎤';
+                sphere.classList.remove('listening');
+            }
+
+            async sendToAI() {
+                try {
+                    const conversationHistory = this.getConversationHistory();
+                    const messages = [
+                        {
+                            role: "system",
+                            content: "You are a helpful AI assistant. Respond conversationally in English and remember the context of our previous interactions."
+                        },
+                        ...conversationHistory
+                    ];
+
+                    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': 'Bearer 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',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            messages: messages,
+                            model: "llama3-groq-70b-8192-tool-use-preview",
+                            temperature: 0.5,
+                            max_tokens: 1024,
+                            top_p: 0.65
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+
+                    const data = await response.json();
+                    const aiText = data.choices[0].message.content;
+                    
+                    this.addToConversationHistory(aiText, 'assistant');
+                    
+                    this.speakResponse(aiText);
+                } catch (error) {
+                    console.error('AI interaction error:', error);
+                }
+            }
+
+            speakResponse(text) {
+    if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(text);
+
+        const voices = window.speechSynthesis.getVoices();
+
+        if (voices.length === 0) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                this.selectVoiceAndSpeak(text);
+            };
+        } else {
+            this.selectVoiceAndSpeak(text);
+        }
+    }
+}
+
+selectVoiceAndSpeak(text) {
+    const voices = window.speechSynthesis.getVoices();
+
+    console.log(voices);
+
+    let femaleVoice = voices.find(voice => voice.name === 'Microsoft Zira - English (United States)'); // Example, change if necessary
+
+    if (!femaleVoice) {
+        femaleVoice = voices.find(voice => voice.lang === 'en-US' || voice.lang === 'en-GB');
+    }
+
+    if (femaleVoice) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.voice = femaleVoice;
+        window.speechSynthesis.speak(utterance);
+    } else {
+        console.log('No suitable voice found');
+    }
+}
+
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            new MemorableVoiceAI();
+        });
+    </script>
+</body>
+</html>
